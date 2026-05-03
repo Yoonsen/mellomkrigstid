@@ -251,7 +251,7 @@ export default function App() {
       <section className="hero">
         <div>
           <p className="eyebrow">Pol1/Pol5 Explorer</p>
-          <h1>Delta TF and Relative DF</h1>
+          <h1>Δtf og rel_df</h1>
           <p className="hero-copy">
             Compare `pol1` and `pol5` side by side. Use one mode to let terms
             bubble up by relative spread and distinctiveness, or switch to a
@@ -351,7 +351,7 @@ export default function App() {
             </label>
 
             <label>
-              Min delta_tf
+              Min Δtf
               <input
                 type="number"
                 step="0.1"
@@ -366,7 +366,7 @@ export default function App() {
             </label>
 
             <label>
-              Min delta_df
+              Min Δdf
               <input
                 type="number"
                 step="0.1"
@@ -413,10 +413,10 @@ export default function App() {
               rel_df &gt; 0.3
             </button>
             <button type="button" onClick={() => setPreset({ minRelDf: 0.3, minDeltaTf: 1 })}>
-              rel_df &gt; 0.3 and delta_tf &gt; 1
+              rel_df &gt; 0.3 and Δtf &gt; 1
             </button>
             <button type="button" onClick={() => setPreset({ minRelDf: 0.3, minDeltaDf: 1 })}>
-              rel_df &gt; 0.3 and delta_df &gt; 1
+              rel_df &gt; 0.3 and Δdf &gt; 1
             </button>
             <button type="button" onClick={resetRankingFilters}>
               Reset
@@ -438,7 +438,7 @@ export default function App() {
                   {fmtInt(visibleByDataset[dataset].length)} of{" "}
                   {fmtInt(filteredByDataset[dataset].length)} visible rows.
                 </p>
-                <p>{fmtInt(docsByDataset[dataset])} books in this subcorpus.</p>
+                <p>{fmtInt(docsByDataset[dataset])} bøker i dette delkorpuset.</p>
               </div>
               <div className="table-wrap">
                 <table>
@@ -451,32 +451,32 @@ export default function App() {
                       </th>
                       <th>
                         <button type="button" className="sort-button" onClick={() => toggleSort("tf_sub")}>
-                          {renderSortLabel("tf_sub", "tf_sub")}
+                          {renderSortLabel("tf", "tf_sub")}
                         </button>
                       </th>
                       <th>
                         <button type="button" className="sort-button" onClick={() => toggleSort("df_sub")}>
-                          {renderSortLabel("books", "df_sub")}
+                          {renderSortLabel("bøker", "df_sub")}
                         </button>
                       </th>
                       <th>
                         <button type="button" className="sort-button" onClick={() => toggleSort("p_df_sub")}>
-                          {renderSortLabel("p_df_sub", "p_df_sub")}
+                          {renderSortLabel("rel_df", "p_df_sub")}
                         </button>
                       </th>
                       <th>
                         <button type="button" className="sort-button" onClick={() => toggleSort("delta_tf")}>
-                          {renderSortLabel("delta_tf", "delta_tf")}
+                          {renderSortLabel("Δtf", "delta_tf")}
                         </button>
                       </th>
                       <th>
                         <button type="button" className="sort-button" onClick={() => toggleSort("delta_df")}>
-                          {renderSortLabel("delta_df", "delta_df")}
+                          {renderSortLabel("Δdf", "delta_df")}
                         </button>
                       </th>
                       <th>
                         <button type="button" className="sort-button" onClick={() => toggleSort("delta_product")}>
-                          {renderSortLabel("delta_tf × delta_df", "delta_product")}
+                          {renderSortLabel("Δtf × Δdf", "delta_product")}
                         </button>
                       </th>
                     </tr>
