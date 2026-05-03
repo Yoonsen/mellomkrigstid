@@ -56,7 +56,9 @@ export async function loadDataset(dataset: DatasetKey): Promise<TermRow[]> {
   const cached = datasetCache.get(dataset);
   if (cached) return cached;
 
-  const promise = fetch(`/data/${dataset}_vs_reference.csv`)
+  const datasetUrl = `${import.meta.env.BASE_URL}data/${dataset}_vs_reference.csv`;
+
+  const promise = fetch(datasetUrl)
     .then(async (response) => {
       if (!response.ok) {
         throw new Error(`Could not load dataset ${dataset}`);
