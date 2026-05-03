@@ -1,0 +1,10 @@
+[project]
+name = "mellomkrigstid"
+version = "0.1.0"
+description = "Corpus building and RN/PMI analysis for interwar subcorpora"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "dhlab>=2.43",
+    "pandas>=3.0.2",
+]

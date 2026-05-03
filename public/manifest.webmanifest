@@ -1,0 +1,17 @@
+{
+  "name": "Pol1/Pol5 Explorer",
+  "short_name": "PolExplorer",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f8fafc",
+  "theme_color": "#111827",
+  "description": "Inspect precomputed pol1 and pol5 term comparisons against the reference corpus.",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

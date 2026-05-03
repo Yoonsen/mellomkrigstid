@@ -1,0 +1,36 @@
+{
+  "name": "mellomkrigstid",
+  "version": "1.0.0",
+  "description": "Dette prosjektet bygger et bakgrunnskorpus for mellomkrigstida og sammenligner to delkorpus, `pol1` og `pol5`, for a finne hvilke ord som er mest typiske for det ene og det andre.",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Yoonsen/mellomkrigstid.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "bugs": {
+    "url": "https://github.com/Yoonsen/mellomkrigstid/issues"
+  },
+  "homepage": "https://github.com/Yoonsen/mellomkrigstid#readme",
+  "dependencies": {
+    "papaparse": "^5.5.3",
+    "react": "^19.2.5",
+    "react-dom": "^19.2.5"
+  },
+  "devDependencies": {
+    "@types/papaparse": "^5.5.2",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.1.0",
+    "typescript": "^6.0.3",
+    "vite": "^7.3.2",
+    "vite-plugin-pwa": "^1.2.0"
+  }
+}

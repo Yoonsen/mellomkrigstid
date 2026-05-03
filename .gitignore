@@ -50,3 +50,9 @@ vite.svg
 .DS_Store
 .idea/
 .vscode/
+
+# Local analysis outputs / unpublished source data
+dev-dist/
+results/
+data/urns/
+*.xlsx
