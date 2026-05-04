@@ -11,6 +11,19 @@ type SortKey =
   | "df_sub";
 type ViewMode = "ranking" | "keywords";
 type DatasetState = Record<DatasetKey, TermRow[]>;
+type DisplayRow = {
+  key: string;
+  sharedKey: string;
+  term: string;
+  tf_sub: number;
+  df_sub: number;
+  p_df_sub: number;
+  delta_tf: number;
+  delta_df: number;
+  isGrouped: boolean;
+  variantCount: number;
+  variants: string[];
+};
 type NumericFilterState = {
   minRelDf: number;
   minDeltaTf: number;
@@ -52,6 +65,28 @@ function inferSubcorpusSize(rows: TermRow[]) {
   return candidates[0] ?? 0;
 }
 
+function inferReferenceDocSize(rows: TermRow[]) {
+  const candidates = rows
+    .filter((row) => row.df_ref > 0 && row.p_df_ref > 0)
+    .map((row) => Math.round(row.df_ref / row.p_df_ref))
+    .filter((value) => Number.isFinite(value) && value > 0);
+
+  return candidates[0] ?? 0;
+}
+
+function inferTokenTotal(
+  rows: TermRow[],
+  tfKey: "tf_sub" | "tf_ref",
+  pKey: "p_tf_sub" | "p_tf_ref",
+) {
+  const candidates = rows
+    .filter((row) => row[tfKey] > 0 && row[pKey] > 0)
+    .map((row) => Math.round(row[tfKey] / row[pKey]))
+    .filter((value) => Number.isFinite(value) && value > 0);
+
+  return candidates[0] ?? 0;
+}
+
 function parseSearchTerms(query: string) {
   return Array.from(
     new Set(
@@ -76,17 +111,76 @@ function buildSearchPatterns(terms: string[]) {
 
     return {
       raw: term,
+      isWildcard: term.includes("*"),
       regex: new RegExp(`^${regexSource}$`, "i"),
     };
   });
 }
 
-function getSortValue(row: TermRow, key: Exclude<SortKey, "term">) {
+function getSortValue(row: DisplayRow, key: Exclude<SortKey, "term">) {
   if (key === "delta_product") {
     return row.delta_tf * row.delta_df;
   }
 
   return row[key];
+}
+
+function toDisplayRow(row: TermRow): DisplayRow {
+  return {
+    key: `row:${row.term}`,
+    sharedKey: row.term.toLowerCase(),
+    term: row.term,
+    tf_sub: row.tf_sub,
+    df_sub: row.df_sub,
+    p_df_sub: row.p_df_sub,
+    delta_tf: row.delta_tf,
+    delta_df: row.delta_df,
+    isGrouped: false,
+    variantCount: 1,
+    variants: [row.term],
+  };
+}
+
+function groupDisplayRows(
+  rows: TermRow[],
+  label: string,
+  subTokenTotal: number,
+  refTokenTotal: number,
+  subDocTotal: number,
+  refDocTotal: number,
+): DisplayRow | null {
+  if (rows.length === 0) return null;
+
+  const tfSub = rows.reduce((sum, row) => sum + row.tf_sub, 0);
+  const tfRef = rows.reduce((sum, row) => sum + row.tf_ref, 0);
+  const dfSub = Math.max(...rows.map((row) => row.df_sub));
+  const dfRef = Math.max(...rows.map((row) => row.df_ref));
+  const pDfSub = subDocTotal > 0 ? dfSub / subDocTotal : 0;
+  const deltaTf =
+    subTokenTotal > 0 && refTokenTotal > 0
+      ? (tfSub / subTokenTotal) / ((tfRef > 0 ? tfRef : 0.5) / refTokenTotal)
+      : 0;
+  const deltaDf =
+    subDocTotal > 0 && refDocTotal > 0
+      ? (dfSub / subDocTotal) / ((dfRef > 0 ? dfRef : 0.5) / refDocTotal)
+      : 0;
+  const variants = Array.from(new Set(rows.map((row) => row.term))).sort((a, b) =>
+    a.localeCompare(b, "nb"),
+  );
+
+  return {
+    key: `group:${label}`,
+    sharedKey: label.toLowerCase(),
+    term: label,
+    tf_sub: tfSub,
+    df_sub: dfSub,
+    p_df_sub: pDfSub,
+    delta_tf: deltaTf,
+    delta_df: deltaDf,
+    isGrouped: true,
+    variantCount: variants.length,
+    variants,
+  };
 }
 
 export default function App() {
@@ -124,22 +218,81 @@ export default function App() {
 
   const searchTerms = useMemo(() => parseSearchTerms(appliedTermQuery), [appliedTermQuery]);
   const searchPatterns = useMemo(() => buildSearchPatterns(searchTerms), [searchTerms]);
+  const docsByDataset = useMemo(
+    () => ({
+      pol1: inferSubcorpusSize(rowsByDataset.pol1),
+      pol5: inferSubcorpusSize(rowsByDataset.pol5),
+    }),
+    [rowsByDataset],
+  );
+  const refDocsByDataset = useMemo(
+    () => ({
+      pol1: inferReferenceDocSize(rowsByDataset.pol1),
+      pol5: inferReferenceDocSize(rowsByDataset.pol5),
+    }),
+    [rowsByDataset],
+  );
+  const tokenTotalsByDataset = useMemo(
+    () => ({
+      pol1: {
+        sub: inferTokenTotal(rowsByDataset.pol1, "tf_sub", "p_tf_sub"),
+        ref: inferTokenTotal(rowsByDataset.pol1, "tf_ref", "p_tf_ref"),
+      },
+      pol5: {
+        sub: inferTokenTotal(rowsByDataset.pol5, "tf_sub", "p_tf_sub"),
+        ref: inferTokenTotal(rowsByDataset.pol5, "tf_ref", "p_tf_ref"),
+      },
+    }),
+    [rowsByDataset],
+  );
 
   const filteredByDataset = useMemo(() => {
     const isKeywordMode = viewMode === "keywords";
 
-    const filterAndSort = (rows: TermRow[]) => {
-      const next = rows.filter((row) => {
-        if (isKeywordMode) {
-          if (searchPatterns.length === 0) return false;
-          return searchPatterns.some(({ regex }) => regex.test(row.term));
+    const filterAndSort = (rows: TermRow[], dataset: DatasetKey) => {
+      let next: DisplayRow[];
+
+      if (isKeywordMode) {
+        const keywordRows: DisplayRow[] = [];
+        const seenRawRows = new Set<string>();
+
+        for (const pattern of searchPatterns) {
+          if (pattern.isWildcard) {
+            for (const row of rows) {
+              if (!pattern.regex.test(row.term)) continue;
+              const displayRow = toDisplayRow(row);
+              if (seenRawRows.has(displayRow.key)) continue;
+              seenRawRows.add(displayRow.key);
+              keywordRows.push(displayRow);
+            }
+            continue;
+          }
+
+          const groupedRow = groupDisplayRows(
+            rows.filter((row) => pattern.regex.test(row.term)),
+            pattern.raw,
+            tokenTotalsByDataset[dataset].sub,
+            tokenTotalsByDataset[dataset].ref,
+            docsByDataset[dataset],
+            refDocsByDataset[dataset],
+          );
+
+          if (groupedRow) {
+            keywordRows.push(groupedRow);
+          }
         }
 
-        if (row.p_df_sub < appliedFilters.minRelDf) return false;
-        if (row.delta_tf < appliedFilters.minDeltaTf) return false;
-        if (row.delta_df < appliedFilters.minDeltaDf) return false;
-        return true;
-      });
+        next = keywordRows;
+      } else {
+        next = rows
+          .filter((row) => {
+            if (row.p_df_sub < appliedFilters.minRelDf) return false;
+            if (row.delta_tf < appliedFilters.minDeltaTf) return false;
+            if (row.delta_df < appliedFilters.minDeltaDf) return false;
+            return true;
+          })
+          .map(toDisplayRow);
+      }
 
       next.sort((a, b) => {
         if (sortState.key === "term") {
@@ -161,10 +314,19 @@ export default function App() {
     };
 
     return {
-      pol1: filterAndSort(rowsByDataset.pol1),
-      pol5: filterAndSort(rowsByDataset.pol5),
+      pol1: filterAndSort(rowsByDataset.pol1, "pol1"),
+      pol5: filterAndSort(rowsByDataset.pol5, "pol5"),
     };
-  }, [rowsByDataset, appliedFilters, searchPatterns, sortState, viewMode]);
+  }, [
+    appliedFilters,
+    docsByDataset,
+    refDocsByDataset,
+    rowsByDataset,
+    searchPatterns,
+    sortState,
+    tokenTotalsByDataset,
+    viewMode,
+  ]);
 
   const visibleByDataset = useMemo(
     () => ({
@@ -175,17 +337,11 @@ export default function App() {
   );
 
   const sharedTerms = useMemo(() => {
-    const pol1Terms = new Set(filteredByDataset.pol1.map((row) => row.term));
-    return new Set(filteredByDataset.pol5.map((row) => row.term).filter((term) => pol1Terms.has(term)));
+    const pol1Terms = new Set(filteredByDataset.pol1.map((row) => row.sharedKey));
+    return new Set(
+      filteredByDataset.pol5.map((row) => row.sharedKey).filter((term) => pol1Terms.has(term)),
+    );
   }, [filteredByDataset]);
-
-  const docsByDataset = useMemo(
-    () => ({
-      pol1: inferSubcorpusSize(rowsByDataset.pol1),
-      pol5: inferSubcorpusSize(rowsByDataset.pol5),
-    }),
-    [rowsByDataset],
-  );
 
   const totalRowsLoaded = rowsByDataset.pol1.length + rowsByDataset.pol5.length;
   const hasPendingChanges =
@@ -255,7 +411,7 @@ export default function App() {
           <p className="hero-copy">
             Compare `pol1` and `pol5` side by side. Use one mode to let terms
             bubble up by relative spread and distinctiveness, or switch to a
-            keyword mode for exact ordformer.
+            keyword mode for exact ordformer and grouped skrivemåter.
           </p>
         </div>
         <div className="hero-stats">
@@ -326,8 +482,8 @@ export default function App() {
           </div>
           <p className="search-help">
             {searchTerms.length > 0
-              ? `Søk aktivt: ${searchTerms.join(", ")}. Treff er uavhengige av rel_df og delta-filtrene. Bruk * som jokertegn, for eksempel kommunis* eller *kommunisme.`
-              : "Legg inn ett eller flere ord og trykk Søk. Bruk * som jokertegn for trunkering."}
+              ? `Søk aktivt: ${searchTerms.join(", ")}. Eksakte former grupperes på tvers av kapitalisering, mens *-søk vises som enkeltformer. Bruk * som jokertegn, for eksempel kommunis* eller *kommunisme.`
+              : "Legg inn ett eller flere ord og trykk Søk. Eksakte former grupperes, mens * brukes til trunkering."}
           </p>
         </section>
       ) : (
@@ -483,11 +639,16 @@ export default function App() {
                   </thead>
                   <tbody>
                     {visibleByDataset[dataset].map((row) => {
-                      const isShared = sharedTerms.has(row.term);
+                      const isShared = sharedTerms.has(row.sharedKey);
                       return (
-                        <tr key={`${dataset}-${row.term}`} className={isShared ? "shared-row" : undefined}>
+                        <tr key={`${dataset}-${row.key}`} className={isShared ? "shared-row" : undefined}>
                           <td className="term-cell">
-                            {row.term}
+                            <span title={row.isGrouped ? row.variants.join(", ") : undefined}>{row.term}</span>
+                            {row.isGrouped && row.variantCount > 1 ? (
+                              <span className="grouped-badge" title={row.variants.join(", ")}>
+                                {row.variantCount} former
+                              </span>
+                            ) : null}
                             {isShared ? <span className="shared-badge">shared</span> : null}
                           </td>
                           <td>{fmtInt(row.tf_sub)}</td>
