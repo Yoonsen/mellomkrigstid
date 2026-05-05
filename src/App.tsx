@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import {
+  fetchCorpusHits,
+  loadCorpusBooks,
+  type CorpusBook,
   type DatasetKey,
   type DatasetMetadata,
   loadDataset,
@@ -34,6 +37,19 @@ type NumericFilterState = {
   minRelDf: number;
   minDeltaTf: number;
   minDeltaDf: number;
+};
+type BookHit = CorpusBook & {
+  tf: number;
+  docTotal: number;
+  matchedWords: string[];
+};
+type BookPanelState = {
+  dataset: DatasetKey;
+  rowLabel: string;
+  variants: string[];
+  loading: boolean;
+  error: string | null;
+  hits: BookHit[];
 };
 type SortState = {
   key: SortKey;
@@ -180,6 +196,7 @@ export default function App() {
   const [appliedTermQuery, setAppliedTermQuery] = useState("");
   const [sortState, setSortState] = useState<SortState>(DEFAULT_SORT);
   const [rowLimit, setRowLimit] = useState(DEFAULT_LIMIT);
+  const [bookPanel, setBookPanel] = useState<BookPanelState | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -362,6 +379,72 @@ export default function App() {
 
   function applyKeywordSearch() {
     setAppliedTermQuery(termQuery);
+  }
+
+  async function openBookPanel(dataset: DatasetKey, row: DisplayRow) {
+    setBookPanel({
+      dataset,
+      rowLabel: row.term,
+      variants: row.variants,
+      loading: true,
+      error: null,
+      hits: [],
+    });
+
+    try {
+      const books = await loadCorpusBooks(dataset);
+      const hits = await fetchCorpusHits(
+        books.map((book) => book.urn).filter(Boolean),
+        row.variants,
+      );
+      const booksById = new Map(books.map((book) => [book.dhlabid, book]));
+      const aggregated = new Map<number, BookHit>();
+
+      for (const hit of hits) {
+        const book = booksById.get(hit.dhlabid);
+        if (!book) continue;
+
+        const existing = aggregated.get(hit.dhlabid);
+        if (existing) {
+          existing.tf += hit.tf;
+          existing.matchedWords = Array.from(new Set([...existing.matchedWords, hit.word]));
+          continue;
+        }
+
+        aggregated.set(hit.dhlabid, {
+          ...book,
+          tf: hit.tf,
+          docTotal: hit.docTotal,
+          matchedWords: [hit.word],
+        });
+      }
+
+      const resolvedHits = Array.from(aggregated.values()).sort(
+        (a, b) => b.tf - a.tf || (a.year ?? 0) - (b.year ?? 0) || a.title.localeCompare(b.title, "nb"),
+      );
+
+      setBookPanel({
+        dataset,
+        rowLabel: row.term,
+        variants: row.variants,
+        loading: false,
+        error: null,
+        hits: resolvedHits,
+      });
+    } catch (err) {
+      setBookPanel({
+        dataset,
+        rowLabel: row.term,
+        variants: row.variants,
+        loading: false,
+        error: err instanceof Error ? err.message : "Could not load title hits",
+        hits: [],
+      });
+    }
+  }
+
+  function closeBookPanel() {
+    setBookPanel(null);
   }
 
   return (
@@ -615,7 +698,14 @@ export default function App() {
                           </td>
                           <td>{fmtInt(row.tf_sub)}</td>
                           <td>
-                            {fmtInt(row.df_sub)} av {fmtInt(metadataByDataset[dataset].sub_docs)}
+                            <button
+                              type="button"
+                              className="books-cell-button"
+                              onClick={() => openBookPanel(dataset, row)}
+                              title="Vis titler for denne raden"
+                            >
+                              {fmtInt(row.df_sub)}
+                            </button>
                           </td>
                           <td>{fmtNumber(row.p_df_sub, 3)}</td>
                           <td>{fmtNumber(row.delta_tf, 2)}</td>
@@ -631,6 +721,53 @@ export default function App() {
           ))}
         </section>
       )}
+
+      {bookPanel ? (
+        <div className="modal-backdrop" onClick={closeBookPanel}>
+          <section className="modal-panel" onClick={(event) => event.stopPropagation()}>
+            <div className="modal-header">
+              <div>
+                <p className="eyebrow">Tittelliste</p>
+                <h2>
+                  {bookPanel.rowLabel} i {bookPanel.dataset.toUpperCase()}
+                </h2>
+                <p className="modal-copy">
+                  {bookPanel.variants.length > 1
+                    ? `Former: ${bookPanel.variants.join(", ")}`
+                    : "Eksakt radtreff i valgt delkorpus."}
+                </p>
+              </div>
+              <button type="button" className="modal-close" onClick={closeBookPanel}>
+                Lukk
+              </button>
+            </div>
+
+            {bookPanel.loading ? <div className="panel">Laster titler...</div> : null}
+            {bookPanel.error ? <div className="panel error">{bookPanel.error}</div> : null}
+
+            {!bookPanel.loading && !bookPanel.error ? (
+              <div className="modal-results">
+                <p className="modal-summary">{fmtInt(bookPanel.hits.length)} bøker med treff.</p>
+                <ul className="book-hit-list">
+                  {bookPanel.hits.map((hit) => (
+                    <li key={`${bookPanel.dataset}-${hit.dhlabid}`} className="book-hit-item">
+                      <div>
+                        <strong>{hit.title || "Uten tittel"}</strong>
+                        <p>
+                          {[hit.authors, hit.year ? String(hit.year) : ""].filter(Boolean).join(" | ")}
+                        </p>
+                      </div>
+                      <div className="book-hit-meta">
+                        <span>{fmtInt(hit.tf)} treff</span>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+          </section>
+        </div>
+      ) : null}
     </main>
   );
 }

@@ -329,6 +329,104 @@ thead th {
   font-weight: 500;
 }
 
+.books-cell-button {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: #1d4ed8;
+  cursor: pointer;
+  font-weight: 600;
+  padding: 0;
+}
+
+.books-cell-button:hover {
+  color: #1e40af;
+  text-decoration: underline;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.35);
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  z-index: 20;
+}
+
+.modal-panel {
+  width: min(820px, 100%);
+  max-height: 80vh;
+  overflow: auto;
+  background: #ffffff;
+  border: 1px solid #dbe4f0;
+  border-radius: 16px;
+  box-shadow: 0 20px 50px rgba(15, 23, 42, 0.18);
+  padding: 20px;
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: start;
+  margin-bottom: 16px;
+}
+
+.modal-header h2 {
+  margin: 0 0 8px;
+  font-size: 1.5rem;
+}
+
+.modal-copy,
+.modal-summary {
+  margin: 0;
+  color: #475569;
+}
+
+.modal-close {
+  padding: 10px 14px;
+  border: 1px solid #cbd5e1;
+  background: #ffffff;
+  color: #0f172a;
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+.modal-results {
+  display: grid;
+  gap: 12px;
+}
+
+.book-hit-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.book-hit-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 16px;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #f8fafc;
+}
+
+.book-hit-item p {
+  margin: 6px 0 0;
+  color: #64748b;
+}
+
+.book-hit-meta {
+  white-space: nowrap;
+  color: #1d4ed8;
+  font-weight: 600;
+}
+
 @media (max-width: 900px) {
   .hero {
     grid-template-columns: 1fr;
@@ -340,5 +438,15 @@ thead th {
 
   .app-shell {
     padding: 16px;
+  }
+
+  .modal-backdrop {
+    padding: 12px;
+  }
+
+  .modal-header,
+  .book-hit-item {
+    grid-template-columns: 1fr;
+    display: grid;
   }
 }

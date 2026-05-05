@@ -26,6 +26,22 @@ export type DatasetPayload = {
 };
 
 const datasetCache = new Map<DatasetKey, Promise<DatasetPayload>>();
+const corpusBooksCache = new Map<DatasetKey, Promise<CorpusBook[]>>();
+
+export type CorpusBook = {
+  dhlabid: number;
+  urn: string;
+  title: string;
+  authors: string;
+  year: number | null;
+};
+
+export type CorpusHit = {
+  dhlabid: number;
+  word: string;
+  tf: number;
+  docTotal: number;
+};
 
 function parseNumber(value: unknown): number {
   if (typeof value === "number") return value;
@@ -84,4 +100,51 @@ export async function loadDataset(dataset: DatasetKey): Promise<DatasetPayload> 
 
   datasetCache.set(dataset, promise);
   return promise;
+}
+
+export async function loadCorpusBooks(dataset: DatasetKey): Promise<CorpusBook[]> {
+  const cached = corpusBooksCache.get(dataset);
+  if (cached) return cached;
+
+  const booksUrl = `${import.meta.env.BASE_URL}data/${dataset}_books.json`;
+  const promise = fetch(booksUrl).then(async (response) => {
+    if (!response.ok) {
+      throw new Error(`Could not load corpus metadata for ${dataset}`);
+    }
+    return (await response.json()) as CorpusBook[];
+  });
+
+  corpusBooksCache.set(dataset, promise);
+  return promise;
+}
+
+export async function fetchCorpusHits(
+  urns: string[],
+  words: string[],
+): Promise<CorpusHit[]> {
+  const response = await fetch("https://api.nb.no/dhlab/frequencies", {
+    method: "POST",
+    headers: {
+      accept: "application/json",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      cutoff: 1,
+      urns,
+      words,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error("Could not load title hits");
+  }
+
+  const data = (await response.json()) as Array<[number, string, number, number]>;
+
+  return data.map(([dhlabid, word, tf, docTotal]) => ({
+    dhlabid,
+    word,
+    tf,
+    docTotal,
+  }));
 }

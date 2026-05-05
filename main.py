@@ -359,6 +359,46 @@ def export_app_dataset(
     return slim, metadata
 
 
+def export_app_books(input_path: Path, output_path: Path) -> list[dict[str, Any]]:
+    records = load_records(input_path)
+    books: list[dict[str, Any]] = []
+
+    for row in records:
+        if not row.get("urn") or not row.get("dhlabid"):
+            continue
+        try:
+            dhlabid = int(row["dhlabid"])
+        except (TypeError, ValueError):
+            continue
+
+        year_value = row.get("year", "")
+        try:
+            year = int(year_value) if year_value else None
+        except ValueError:
+            year = None
+
+        books.append(
+            {
+                "dhlabid": dhlabid,
+                "urn": row.get("urn", ""),
+                "title": row.get("title", ""),
+                "authors": row.get("authors", ""),
+                "year": year,
+            }
+        )
+
+    deduped: dict[int, dict[str, Any]] = {}
+    for book in books:
+        deduped[book["dhlabid"]] = book
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(
+        json.dumps(list(deduped.values()), ensure_ascii=False, separators=(",", ":")),
+        encoding="utf-8",
+    )
+    return list(deduped.values())
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Fetch reference URNs from NB and run dhlab counts."
@@ -405,6 +445,12 @@ def build_parser() -> argparse.ArgumentParser:
     app_data_parser.add_argument("--output", type=Path, required=True)
     app_data_parser.add_argument("--metadata-output", type=Path, required=True)
     app_data_parser.add_argument("--decimals", type=int, default=6)
+
+    app_books_parser = subparsers.add_parser(
+        "app-books", help="Export slim corpus book metadata for app lookups"
+    )
+    app_books_parser.add_argument("--input", type=Path, required=True)
+    app_books_parser.add_argument("--output", type=Path, required=True)
 
     return parser
 
@@ -497,6 +543,12 @@ def main() -> None:
         print(f"Exported {len(slim)} app rows from {args.compare}")
         print(f"Saved slim app dataset to {args.output}")
         print(f"Saved metadata to {args.metadata_output}: {metadata}")
+        return
+
+    if args.command == "app-books":
+        books = export_app_books(input_path=args.input, output_path=args.output)
+        print(f"Exported {len(books)} corpus books from {args.input}")
+        print(f"Saved app book metadata to {args.output}")
         return
 
     parser.error(f"Unknown command: {args.command}")
