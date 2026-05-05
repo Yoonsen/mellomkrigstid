@@ -1,5 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
-import { type DatasetKey, loadDataset, type TermRow } from "./lib/data";
+import {
+  type DatasetKey,
+  type DatasetMetadata,
+  loadDataset,
+  type TermRow,
+} from "./lib/data";
 
 type SortKey =
   | "term"
@@ -11,6 +16,7 @@ type SortKey =
   | "df_sub";
 type ViewMode = "ranking" | "keywords";
 type DatasetState = Record<DatasetKey, TermRow[]>;
+type MetadataState = Record<DatasetKey, DatasetMetadata>;
 type DisplayRow = {
   key: string;
   sharedKey: string;
@@ -35,6 +41,13 @@ type SortState = {
 };
 
 const DEFAULT_LIMIT = 200;
+const EMPTY_METADATA: DatasetMetadata = {
+  sub_docs: 0,
+  ref_docs: 0,
+  sub_tokens: 0,
+  ref_tokens: 0,
+  rows: 0,
+};
 const DEFAULT_FILTERS: NumericFilterState = {
   minRelDf: 0.3,
   minDeltaTf: 0,
@@ -54,37 +67,6 @@ function fmtNumber(value: number, digits = 2) {
 
 function fmtInt(value: number) {
   return value.toLocaleString("nb-NO");
-}
-
-function inferSubcorpusSize(rows: TermRow[]) {
-  const candidates = rows
-    .filter((row) => row.df_sub > 0 && row.p_df_sub > 0)
-    .map((row) => Math.round(row.df_sub / row.p_df_sub))
-    .filter((value) => Number.isFinite(value) && value > 0);
-
-  return candidates[0] ?? 0;
-}
-
-function inferReferenceDocSize(rows: TermRow[]) {
-  const candidates = rows
-    .filter((row) => row.df_ref > 0 && row.p_df_ref > 0)
-    .map((row) => Math.round(row.df_ref / row.p_df_ref))
-    .filter((value) => Number.isFinite(value) && value > 0);
-
-  return candidates[0] ?? 0;
-}
-
-function inferTokenTotal(
-  rows: TermRow[],
-  tfKey: "tf_sub" | "tf_ref",
-  pKey: "p_tf_sub" | "p_tf_ref",
-) {
-  const candidates = rows
-    .filter((row) => row[tfKey] > 0 && row[pKey] > 0)
-    .map((row) => Math.round(row[tfKey] / row[pKey]))
-    .filter((value) => Number.isFinite(value) && value > 0);
-
-  return candidates[0] ?? 0;
 }
 
 function parseSearchTerms(query: string) {
@@ -125,14 +107,14 @@ function getSortValue(row: DisplayRow, key: Exclude<SortKey, "term">) {
   return row[key];
 }
 
-function toDisplayRow(row: TermRow): DisplayRow {
+function toDisplayRow(row: TermRow, subDocs: number): DisplayRow {
   return {
     key: `row:${row.term}`,
     sharedKey: row.term.toLowerCase(),
     term: row.term,
     tf_sub: row.tf_sub,
     df_sub: row.df_sub,
-    p_df_sub: row.p_df_sub,
+    p_df_sub: subDocs > 0 ? row.df_sub / subDocs : 0,
     delta_tf: row.delta_tf,
     delta_df: row.delta_df,
     isGrouped: false,
@@ -185,6 +167,10 @@ function groupDisplayRows(
 
 export default function App() {
   const [rowsByDataset, setRowsByDataset] = useState<DatasetState>({ pol1: [], pol5: [] });
+  const [metadataByDataset, setMetadataByDataset] = useState<MetadataState>({
+    pol1: EMPTY_METADATA,
+    pol5: EMPTY_METADATA,
+  });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("ranking");
@@ -202,7 +188,8 @@ export default function App() {
     Promise.all([loadDataset("pol1"), loadDataset("pol5")])
       .then(([pol1, pol5]) => {
         if (cancelled) return;
-        setRowsByDataset({ pol1, pol5 });
+        setRowsByDataset({ pol1: pol1.rows, pol5: pol5.rows });
+        setMetadataByDataset({ pol1: pol1.metadata, pol5: pol5.metadata });
         setLoading(false);
       })
       .catch((err: Error) => {
@@ -218,33 +205,6 @@ export default function App() {
 
   const searchTerms = useMemo(() => parseSearchTerms(appliedTermQuery), [appliedTermQuery]);
   const searchPatterns = useMemo(() => buildSearchPatterns(searchTerms), [searchTerms]);
-  const docsByDataset = useMemo(
-    () => ({
-      pol1: inferSubcorpusSize(rowsByDataset.pol1),
-      pol5: inferSubcorpusSize(rowsByDataset.pol5),
-    }),
-    [rowsByDataset],
-  );
-  const refDocsByDataset = useMemo(
-    () => ({
-      pol1: inferReferenceDocSize(rowsByDataset.pol1),
-      pol5: inferReferenceDocSize(rowsByDataset.pol5),
-    }),
-    [rowsByDataset],
-  );
-  const tokenTotalsByDataset = useMemo(
-    () => ({
-      pol1: {
-        sub: inferTokenTotal(rowsByDataset.pol1, "tf_sub", "p_tf_sub"),
-        ref: inferTokenTotal(rowsByDataset.pol1, "tf_ref", "p_tf_ref"),
-      },
-      pol5: {
-        sub: inferTokenTotal(rowsByDataset.pol5, "tf_sub", "p_tf_sub"),
-        ref: inferTokenTotal(rowsByDataset.pol5, "tf_ref", "p_tf_ref"),
-      },
-    }),
-    [rowsByDataset],
-  );
 
   const filteredByDataset = useMemo(() => {
     const isKeywordMode = viewMode === "keywords";
@@ -260,7 +220,7 @@ export default function App() {
           if (pattern.isWildcard) {
             for (const row of rows) {
               if (!pattern.regex.test(row.term)) continue;
-              const displayRow = toDisplayRow(row);
+              const displayRow = toDisplayRow(row, metadataByDataset[dataset].sub_docs);
               if (seenRawRows.has(displayRow.key)) continue;
               seenRawRows.add(displayRow.key);
               keywordRows.push(displayRow);
@@ -271,10 +231,10 @@ export default function App() {
           const groupedRow = groupDisplayRows(
             rows.filter((row) => pattern.regex.test(row.term)),
             pattern.raw,
-            tokenTotalsByDataset[dataset].sub,
-            tokenTotalsByDataset[dataset].ref,
-            docsByDataset[dataset],
-            refDocsByDataset[dataset],
+            metadataByDataset[dataset].sub_tokens,
+            metadataByDataset[dataset].ref_tokens,
+            metadataByDataset[dataset].sub_docs,
+            metadataByDataset[dataset].ref_docs,
           );
 
           if (groupedRow) {
@@ -286,12 +246,16 @@ export default function App() {
       } else {
         next = rows
           .filter((row) => {
-            if (row.p_df_sub < appliedFilters.minRelDf) return false;
+            const relDf =
+              metadataByDataset[dataset].sub_docs > 0
+                ? row.df_sub / metadataByDataset[dataset].sub_docs
+                : 0;
+            if (relDf < appliedFilters.minRelDf) return false;
             if (row.delta_tf < appliedFilters.minDeltaTf) return false;
             if (row.delta_df < appliedFilters.minDeltaDf) return false;
             return true;
           })
-          .map(toDisplayRow);
+          .map((row) => toDisplayRow(row, metadataByDataset[dataset].sub_docs));
       }
 
       next.sort((a, b) => {
@@ -319,12 +283,10 @@ export default function App() {
     };
   }, [
     appliedFilters,
-    docsByDataset,
-    refDocsByDataset,
+    metadataByDataset,
     rowsByDataset,
     searchPatterns,
     sortState,
-    tokenTotalsByDataset,
     viewMode,
   ]);
 
@@ -594,7 +556,7 @@ export default function App() {
                   {fmtInt(visibleByDataset[dataset].length)} of{" "}
                   {fmtInt(filteredByDataset[dataset].length)} visible rows.
                 </p>
-                <p>{fmtInt(docsByDataset[dataset])} bøker i dette delkorpuset.</p>
+                <p>{fmtInt(metadataByDataset[dataset].sub_docs)} bøker i dette delkorpuset.</p>
               </div>
               <div className="table-wrap">
                 <table>
@@ -653,7 +615,7 @@ export default function App() {
                           </td>
                           <td>{fmtInt(row.tf_sub)}</td>
                           <td>
-                            {fmtInt(row.df_sub)} av {fmtInt(docsByDataset[dataset])}
+                            {fmtInt(row.df_sub)} av {fmtInt(metadataByDataset[dataset].sub_docs)}
                           </td>
                           <td>{fmtNumber(row.p_df_sub, 3)}</td>
                           <td>{fmtNumber(row.delta_tf, 2)}</td>

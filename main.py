@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import json
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError
@@ -310,6 +311,54 @@ def compare_to_reference(
     return merged
 
 
+def infer_total_from_ratio(
+    frame: pd.DataFrame, numerator_col: str, ratio_col: str
+) -> int:
+    positive = frame[(frame[numerator_col] > 0) & (frame[ratio_col] > 0)]
+    if positive.empty:
+        return 0
+    sample = positive.iloc[0]
+    return int(round(sample[numerator_col] / sample[ratio_col]))
+
+
+def export_app_dataset(
+    compare_path: Path,
+    output_path: Path,
+    metadata_output_path: Path,
+    decimals: int = 6,
+) -> tuple[pd.DataFrame, dict[str, int]]:
+    comparison = pd.read_csv(compare_path)
+
+    slim = comparison.loc[
+        comparison["in_subcorpus"] == True,
+        ["term", "tf_ref", "df_ref", "tf_sub", "df_sub", "delta_tf", "delta_df"],
+    ].copy()
+    slim["term"] = slim["term"].fillna("").astype(str).str.strip()
+    slim = slim[slim["term"] != ""]
+    slim["tf_ref"] = slim["tf_ref"].astype("int64")
+    slim["df_ref"] = slim["df_ref"].astype("int64")
+    slim["tf_sub"] = slim["tf_sub"].astype("int64")
+    slim["df_sub"] = slim["df_sub"].astype("int64")
+    slim["delta_tf"] = slim["delta_tf"].round(decimals)
+    slim["delta_df"] = slim["delta_df"].round(decimals)
+
+    metadata = {
+        "sub_docs": infer_total_from_ratio(comparison, "df_sub", "p_df_sub"),
+        "ref_docs": infer_total_from_ratio(comparison, "df_ref", "p_df_ref"),
+        "sub_tokens": infer_total_from_ratio(comparison, "tf_sub", "p_tf_sub"),
+        "ref_tokens": infer_total_from_ratio(comparison, "tf_ref", "p_tf_ref"),
+        "rows": int(len(slim)),
+    }
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    metadata_output_path.parent.mkdir(parents=True, exist_ok=True)
+    slim.to_csv(output_path, index=False)
+    metadata_output_path.write_text(
+        json.dumps(metadata, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
+    return slim, metadata
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Fetch reference URNs from NB and run dhlab counts."
@@ -348,6 +397,14 @@ def build_parser() -> argparse.ArgumentParser:
     compare_parser.add_argument("--output", type=Path, default=DEFAULT_COMPARE_OUTPUT)
     compare_parser.add_argument("--sub-docs", type=int, required=True)
     compare_parser.add_argument("--reference-docs", type=int, default=3125)
+
+    app_data_parser = subparsers.add_parser(
+        "app-data", help="Export slim app dataset and sidecar metadata"
+    )
+    app_data_parser.add_argument("--compare", type=Path, required=True)
+    app_data_parser.add_argument("--output", type=Path, required=True)
+    app_data_parser.add_argument("--metadata-output", type=Path, required=True)
+    app_data_parser.add_argument("--decimals", type=int, default=6)
 
     return parser
 
@@ -428,6 +485,18 @@ def main() -> None:
         )
         print(f"Compared {args.sub} against {args.reference}")
         print(f"Saved comparison with {len(comparison)} terms to {args.output}")
+        return
+
+    if args.command == "app-data":
+        slim, metadata = export_app_dataset(
+            compare_path=args.compare,
+            output_path=args.output,
+            metadata_output_path=args.metadata_output,
+            decimals=args.decimals,
+        )
+        print(f"Exported {len(slim)} app rows from {args.compare}")
+        print(f"Saved slim app dataset to {args.output}")
+        print(f"Saved metadata to {args.metadata_output}: {metadata}")
         return
 
     parser.error(f"Unknown command: {args.command}")
